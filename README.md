@@ -1,7 +1,7 @@
 stats215a
 =========
 
-Shared repository for the Berkeley's STATS 215A LAB 4 Project
+Shared repository for Berkeley's STATS 215A LAB 4 Project
 
 #####Authors : Fanny Perraudeau, Rafael Valle, Soeren Kuenzel
 

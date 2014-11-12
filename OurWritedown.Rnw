@@ -1,0 +1,1008 @@
+\batchmode
+\makeatletter
+\makeatother
+\documentclass[english]{article}
+\graphicspath{ {pictures/} }
+\usepackage{graphicx, color}
+\usepackage{placeins}
+%% maxwidth is the original width if it is less than linewidth
+%% otherwise use linewidth (to make sure the graphics do not exceed the margin)
+\makeatletter
+\def\maxwidth{ %
+  \ifdim\Gin@nat@width>\linewidth
+    \linewidth
+  \else
+    \Gin@nat@width
+  \fi
+}
+\makeatother
+\IfFileExists{upquote.sty}{\usepackage{upquote}}{}
+\definecolor{fgcolor}{rgb}{0.2, 0.2, 0.2}
+
+\usepackage{framed}
+\makeatletter
+\definecolor{shadecolor}{rgb}{.97, .97, .97}
+\definecolor{messagecolor}{rgb}{0, 0, 0}
+\definecolor{warningcolor}{rgb}{1, 0, 1}
+\definecolor{errorcolor}{rgb}{1, 0, 0}
+\usepackage{alltt}
+\usepackage[T1]{fontenc}
+\usepackage[latin9]{inputenc}
+\usepackage{geometry}
+\geometry{verbose,tmargin=1in,bmargin=1in,lmargin=1in,rmargin=1in}
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+\setlength{\parskip}{\smallskipamount}
+\setlength{\parindent}{0pt}
+\usepackage{amsthm}
+\usepackage{amsmath}
+\makeatletter
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% LyX specific LaTeX commands.
+\providecommand{\LyX}{L\kern-.1667em\lower.25em\hbox{Y}\kern-.125emX\@}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% Textclass specific LaTeX commands.
+\numberwithin{equation}{section}
+\numberwithin{figure}{section}
+\@ifundefined{date}{}{\date{}}
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% User specified LaTeX commands. 
+\makeatother
+\usepackage{babel}
+\usepackage{placeins}
+\usepackage[]{algorithm2e}
+\usepackage{hyperref}
+\usepackage[backend=bibtex]{biblatex}
+\bibliographystyle{plain}
+\bibliography{references.bib}
+
+\begin{document}
+\title{Lab 4 - Cloud Prediction\\
+Stat 215A, Fall 2014}
+\author{Fanny Perraudeau, Rafael Valle and  S\"oren K\"unzel}
+\maketitle
+
+<<eval=TRUE, echo=FALSE, message=FALSE>>=
+opts_chunk$set(fig.width=5, fig.height=3, fig.pos='h!', fig.align='center', echo=FALSE, message=FALSE, dev="png")
+# for bibliography
+Sys.setenv(TEXINPUTS=getwd(),
+           BIBINPUTS=getwd(),
+           BSTINPUTS=getwd())
+
+source("install_packages.R")
+
+packages <- c('knitr', 'ggplot2', 'rgl','YaleToolkit','dplyr', 'reshape2', 'segmented', 'boot', 'mixtools', 'graphics', 'scales', 'pastecs', 'kimisc', 'rpart', 'rpart.plot', 'Hmisc', 'Rcpp', 'xtable')
+
+#Load and install required packages
+loadPackages(packages)
+
+select <- dplyr::select
+options(warn=0)
+
+#Load data
+load("image_data/rawD.RData")
+
+#Load required R scripts
+source("helper_functions.R")
+source("MethodEvaluation.R")
+source("logisticRegression.R")
+source("ELCM_CV_eval.R")
+source("CARTpredictor.R")
+sourceCpp('helpfunctions2.cpp') 
+@
+
+\begin{abstract}
+In this project, we have explored statistical models for daytime cloud 
+detection in the polar regions using radiances obtained by the MISR sensor 
+aboard the NASA satellite Terra. We propose a supervised binary model that 
+classifies an observation as cloud or clean, and provides a confidence 
+score. The features in the 
+data set include Normalized Difference Angular Index (NDAI), Correlation 
+between radiances, Standard Deviation of nadir camera pixel values across a 
+scene, and radiances from 5 different angles \cite{shi2008}.
+During the exploratory data 
+analysis, we investigate the correlation and distribution of these features and 
+their relationship to two classes (cloud and clean). After drawing conclusions 
+from visual and numerical cues, we submit all features to different feature 
+selection methods. Several linear and non-linear statistical models and algorithms 
+are explored and validated against one another. They include Enhanced Linear 
+Correlation Matching, Logistic Regression and Classification and 
+Regression Trees.
+\end{abstract}
+
+\section{Introduction}
+\begin{figure}
+<<Expert Labels, echo=FALSE, message=FALSE, fig.width=9, fig.height=3, background=NA, warning=FALSE, cache=TRUE>>=
+rawD1 <- rawD
+rawD1$Image <- factor(rawD1$Image)
+levels(rawD1$Image) <- c("Image 1", "Image 2", "Image 3")
+rawD1$Label[rawD$label==1] = "Cloudy"
+rawD1$Label[rawD$label==-1] = "Clear"
+rawD1$Label[rawD$label==0] = "Unsure"
+rawD1$Labels <- factor(rawD1$Label)
+
+ggplot(rawD1[]) + geom_point(aes(x=x, y=y, color=Labels)) + 
+  facet_grid(. ~ Image) +
+  scale_colour_manual(values=c("green", "blue", "white")) +
+  theme_minimal() +
+  theme(axis.title = element_blank(), axis.ticks = element_blank(),
+        panel.grid.major = element_blank(), axis.text = element_blank(), 
+        panel.grid.minor = element_blank(), 
+        panel.background = element_rect(fill = "grey99", colour = 'white'),
+        legend.background = element_rect(fill = 'grey99', colour = 'white'))
+rm(rawD1)
+@
+\caption{Cloud distribution from expert labels}
+\end{figure}
+
+\subsection{Binary classification of a semi-discrete response variable}
+The task of building a supervised model to classify some data as cloud or clean raises
+questions related to possible gradations of cloudiness and its relationship to the  features space.
+There are many ways to address this relationship. For example, given some balanced 
+cloud and clean data for some location, computer vision transformations can 
+be used to interpolate between the images at a desired step. This interpolation 
+could be used to transform the binary variable into a semi-discrete space. 
+Although this is related to models that provide a confidence score of classification, 
+the interpolation provides an explicit relationship between the 
+cloudiness predicted and the data. In adddition, the distributions of the 
+features are dependent on when and where the data is collected. Naturally, 
+although interesting as a project, addressing all these issues goes beyond the 
+scope of this project. However, we'll interpolate between the likelihooods of 
+each model given data to provide a score of cloudiness. Details will be covered 
+further on this paper.
+
+\section{EDA}
+\begin{figure}
+<<Proberties Summary, echo=FALSE, message=FALSE, fig.width=10, fig.height=3, background=NA, warning=FALSE, cache=TRUE>>=
+filter(scalebyimage(rawD), Image == "I1") %>%
+  select(y, x, NDAI, logSD, CORR, AN) %>%
+  melt(id=c("x", "y")) %>%
+  ggplot() + geom_point(aes(x=x, y=y, color=value)) +
+  facet_grid(. ~ variable) + 
+  theme_minimal() +
+  theme(legend.position = "none", axis.title = element_blank(),
+        strip.background = element_blank(), axis.ticks = element_blank(),
+        plot.background = element_blank(), panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(), axis.text = element_blank(),
+        panel.background = element_rect(fill = "grey99", colour = 'white'))
+@
+\caption{Distribution of selected features for Image 1.}
+\end{figure}
+
+\subsection{The Features}\label{The Features}
+The aim of the study is to detect clouds on images from the Arctic. It is a challenging problem because clouds and snow-covered surfaces have almost the same proprieties. Unlike traditional image studies that would use only one picture, we used here five cameras with each camera viewing Earth scenes at a different angle. The pictures were taken by the Multiangle Imaging SpectroRadiometer (MISR) on board the National Aeronautics and Space Administration (NASA) Terra satellite launched in
+1999. The five view zenith angles of the cameras were 70.5\textdegree (DF), 60.0\textdegree (CF), 45.6\textdegree (BF), and 26.1\textdegree (AF) in the forward direction and 0.0\textdegree (AN) in the nadir direction. Note that in the paper\cite{shi2008} they used nine cameras instead of five. The data produced by the cameras DF, CF, BF, AF and AN were taken as features in our study. We also used three other physically useful features characterized in the paper: CORR the correlation of MISR images of the same scene from different MISR viewing directions, SD the standard deviation of MISR nadir camera pixel values across a scene and NDAI a normalized difference angular index that characterizes the changes in a scene with changes in the MISR view direction. Finally, the last feature we used was the logarithm of SD (logSD) in order to correct the long tail of this feature. All in all, we studied nine features: DF, CF, BF, AF, AN, CORR, NDAI, SD and logSD.
+
+\subsection{Comparison of radiances given cloud or clean}
+Knowing that the MISR satellite crosses the angles Df, Cf, Bf, Af and An within a 
+short-time span and knowing that these angles correspond to angles 70.5,
+60, 45.6, 26.1, 0.0 respectively, we compare the intra and 
+inter-class correlation of the radiances under two assumptions:
+\begin{enumerate}
+\item The correlation between radiances is inversely proportional to the 
+distance between angles
+\item The correlation between radiances of clear images is higher 
+than cloud images
+\end{enumerate}
+With the purpose of analyzing these assumptions, we plot a correlation matrix 
+of the radiances of all three images (figure \ref{CorrMat}). The overall correlation of 
+radiances in 
+clean obversations is higher than cloud observations. As the angle 
+distances increase, the correlation decreases, which confirms the first 
+assumption. In addition, the smallest correlation in cloud data is .36 less than  
+the smallest correlation in clean data, which confirms the second 
+assumption. This is in consonance with Yu's paper \cite{shi2008} and is the reason, why we 
+consider variables like the inter Correlation between features and the NDAI to 
+distinguish between the two populations. We will investigate 
+this matter in the next paragraphs.
+
+\begin{figure}
+<<radiances_correlation, echo=FALSE, message=FALSE, fig.width=10, fig.height=3, background=NA, warning=FALSE, cache=TRUE>>=
+#Split clean and cloud data
+data_clean = filter(rawD, label==-1)
+data_cloud = filter(rawD, label==1)
+
+#Compute correlation of radiation angles for clean and cloud labels
+clean_correlation = cor(select(data_clean, DF, CF, BF, AF,AN))
+cloud_correlation = cor(select(data_cloud, DF, CF, BF, AF,AN))
+
+par(mfrow=c(1,2))
+PlotCorr(clean_correlation, upper.panel='number', digits=2, col="red", xlab="CLEAN", mar = 0.1 + c(0, 0, 0, 0))
+PlotCorr(cloud_correlation, upper.panel='number', digits=2, col="blue", xlab="CLOUDY", mar = 0.1 + c(1, 0, 0, 0))
+@
+
+\caption{Correlation between radiances of cloud and clean observations}
+\label{CorrMat}
+\end{figure}        
+
+\subsection{Principal Component Analysis}
+We performed Principal Component Analysis (PCA) on the five radiances for each of the 
+images. Averaging over the three images, the first two principal components (PC) captured 
+nearly 98\% of the variance. The first principal component (PC1) was close to the average 
+over all the radiances. 
+It is interesting that the second principal component gave positive loading to the DF and 
+decreased monotnically over CF, BF, AF to AN. So that AN had a negative loading. 
+switching the sign in each loading would still give us the same component, but this 
+second component seems to somewhat characterize how much the Radiances of the same pixel 
+differ from each other. This has somewhat the flavor of a correlation and might be 
+explained by the fact that pixels for which the second component is very high, are these 
+for which the correlation between the features is also high. This motivates the 
+definition of NDAI. \footnote{Refer to Bin et al.\cite{shi2008} for a definition of NDAI}
+
+We explored two ways of calculating principal components: We calculate for each image its 
+own PC or we calculate globally PC and we realized that both ways are very similar, so 
+that it is possible to use the rotation matrix found for one image on other images to get 
+reasonable good Components.
+However, for images 1 and 2, we received a high correlation between the expert labels and 
+PC2, but, for image 3, the correlation did not seem high enough to predict the 
+labels. Keeping in mind that we we want to build predictors for other pictures, we 
+decided not 
+to take into account the principal components, because they just don't seem to be more 
+useful than for example NDAI.
+
+\subsection{Distribution of the features}
+For each image, we plotted the distribution of the features NDAI, log(SD), CORR and AN.
+Furthermore, we seperated the distribution between clear data (-1) and 
+cloudy data (1). We realized that CORR was not an efficient predictor as 
+expected : for each image, the CORR data seem to behave very differently. 
+For example, the first peak in the second and third images belongs
+to clear areas and in the first image it belongs to cloudy areas. This clearly cinforms that CORR alone is not a good predictor. AN did a 
+slightly better job, but its entire distribution on the third 
+image seems to be shifted to the left (Figure \ref{fourVarcomplete}). 
+
+We speculate that some other effect, such as the sun, has influenced the image. 
+Under the assumption that there are effects which mainly 
+shift or linearly rescale the entire distribtuion of an image, 
+we concluded that for some features 
+it makes more sense to scale by image seperately. 
+Thus, we are going to consider these feature scaling approaches:
+\begin{itemize}
+\item Scaling image by image seperately. We will refer to this by "standard scaled" and
+\item Scaling over the entire data set. We will refer to this by "image scaled".
+\end{itemize}
+
+If we compare, for example, the distribution of AN in Figure \ref{fourVarcomplete} 
+and \ref{fourVarbyimage}, we can see that AN seems to have more similar 
+distributions in the case, where the features were scaled image by image.
+
+Scaling the first image seperately from the other images might lead to better 
+results, because we could probably correct for bias due to some effect that
+influences the entire picture (for example different sun positions).
+However, if the distribution in two pictures is very different, a seperate scaling
+might make things worse. For example, if we scale a completely cloudy and a 
+completely clear picture, we would get distributions for both images distributions
+with mean 0 and we might not be able to tell that the first image was completly 
+cloudy.
+
+In addition, it is important to mention that our goal is to come up with a classifier
+that performs well in any image. This classifier will be trained on these
+three images. Once it is set it does not make much sense to rescale the entire 
+distribution with every new image we see. Instead we were thinking about scaling 
+by the mean and standard deviation of the distributions of these
+three images. But we realized that for none of our classifiers it really makes a 
+different whether the entire data is scaled by the same mean and the same variance.
+Furthermore, scaling, for example, the variable SD, destroys some basic relationships 
+between SD, CORR and NDAI and it would give us negative values, which we don't want
+to have for a variable, which represents a standard deviation. 
+Finally, we scaled for some classifiers image by image and for some others, we did not
+scale at all.
+
+In our analysis, NDAI is by far the best predictor. The authors in Yu's \cite{shi2008} 
+paper affirm that NDAI varies too much for each image and thus is not a good predictor. 
+However, we cannot confirm this due to the discrepancies between our and their
+sample size. We assume that we are looking at a subset of images for which the 
+NDAI does not vary a lot and the variable CORR however does. 
+Before applying our proposed methods to other images, we should first check whether 
+or not the NDAI can be assumed to have a similar distribution. 
+Otherwise, scaling the NDAI distribution image by image, might be a good solution.
+
+\begin{figure}
+<<Four Variable Plot complete, echo=FALSE, message=FALSE, fig.width=7, fig.height=5, background=NA, warning=FALSE, cache=TRUE>>=
+df2 <- mutate(scalecomplete(rawD), label= as.factor(label)) %>%
+  filter(label !=0, CORR >-1.5, CORR < 3, AN >-2, AN <1.8) %>%
+  select(Image, label, NDAI, logSD, CORR, AN)
+
+df2$Image <- factor(df2$Image)
+levels(df2$Image) <- c("Image 1", "Image 2", "Image 3")
+df2$Image <- relevel(relevel(factor(df2$Image), ref="Image 3"), ref = "Image 2")
+
+melt(df2, id=c("Image", "label")) %>%
+  ggplot() + geom_density(aes(x=value, color= Image, linetype = label), 
+                          order= df2$ord, size=1, alpha=.5) + 
+  facet_wrap(~variable, scale="free") + 
+  scale_colour_manual(values=c(scales::alpha("blue", 0.4), 
+                               scales::alpha("darkgreen", 0.4),
+                               scales::alpha("red", 1))) +
+  theme_minimal()
+rm(df2)
+@
+\caption{The graphs shows the distribution of four selected features scaled by the entire dataset. 
+I1: Image 1, label -1 means that the expert labled it as clear, label 1 means the expert labeled it as cloudy.}
+\label{fourVarcomplete}
+\end{figure}
+
+\begin{figure}
+<<Four Variable Plot byimage, echo=FALSE, message=FALSE, fig.width=9, fig.height=6, background=NA, warning=FALSE, cache=TRUE>>=
+df2 <- mutate(scalebyimage(rawD), label= as.factor(label)) %>%
+  filter(label !=0, CORR >-1.5, CORR < 3, AN >-2, AN <1.8) %>%
+  select(Image, label, NDAI, logSD, CORR, AN)
+
+df2$Image <- factor(df2$Image)
+levels(df2$Image) <- c("Image 1", "Image 2", "Image 3")
+df2$Image <- relevel(relevel(factor(df2$Image), ref="Image 3"), ref = "Image 2")
+
+melt(df2, id=c("Image", "label")) %>%
+  ggplot() + geom_density(aes(x=value, color= Image, linetype = label), 
+                          order= df2$ord, size=1) + 
+  facet_wrap(~variable, scale="free")+
+  scale_colour_manual(values=c(scales::alpha("blue", 0.4), 
+                               scales::alpha("darkgreen", 0.4),
+                               scales::alpha("red", 1))) +
+  theme_minimal()
+
+rm(df2)
+@
+\caption{The graphs shows the distribution of four selected features scaled by each image seperately. 
+I1: Image 1, label -1 means that the expert labled it as clear, label 1 means the expert labeled it as cloudy.}
+\label{fourVarbyimage}
+\end{figure}
+
+
+
+\subsection{Feature Selection}
+After deciding that NDAI is one of the most important features to use 
+for prediction, we tried to find another feature, which could be used for 
+classification). %seperating the different distributions of the two populations (cloudy and clear)
+We tried to predict cloudy data only based on NDAI and analysed the  misclassified reagions. 
+Visually, it was not easy to infer which other variable was the second best predictor. 
+We considered log(SD) to be a strong candidate, because it seemed contain a lot of information NDAI does not contain.
+
+Looking at figure \ref{2D NDAI}, we can confirm these findings. Most of the seperation 
+can be done with NDAI. Other features are less efficient to seperate the two populations.
+However, according to the plots, log(SD) seems to be the second most efficient feature. We 
+confirmed that this is also possible for image one and two in figure \ref{conf}. 
+
+On the contrary, this high efficiency of NDAI and logSD could be a byproduct of 
+the high correlation, meaning that using both features yields small increase in 
+information and thus in possibilities to train estimators. In fact, the correlation 
+between NDAI and logSD is very high, .82, 
+while other features have an absolute correlation of at most .5. 
+In other words, we might conclude that logSD is also an important variable, but we do not 
+really get better predicting proberties by using both logSD and NDAI over using just 
+NDAI.
+
+<<echo=FALSE, eval=FALSE>>=
+round(cor(rawD[,5:15]),2)*100
+@
+
+Another strategy is to use the feature which has the lowest mutual information with NDAI.
+Although this would work very well for categorial features, it is general very difficult 
+to estimate the mutual information of continuous features and we expect such an 
+estimate not to be precise.
+But in the continuous variables case, an alternative strategy is to choose the feature 
+with the lowest absolute correlation with NDAI. This feature is DF, which has a
+correlation of about $-.16$.
+
+This result is confirmed by using backwards selection based on AIC for logistic
+regression models: The feature logSD is deleted very early and the the best 
+features are NDAI, DF and BF.
+However, the features selected by a CART predictor after tree-pruning using 
+the one SD rule do not include DF or BF. The features selected by CART are NDAI and AN.
+
+
+
+\begin{figure}
+<<2d densities, echo=FALSE, message=FALSE, fig.width=9, fig.height=6, background=NA, warning=FALSE, cache=TRUE>>=
+
+mutate(scalecomplete(rawD)[sample(1:nrow(rawD)),], label = as.factor(label)) %>%
+  filter(Image=="I3", label!=0) %>%
+  select(label:NDAI, CORR:AN, logSD, PC1compscld, PC2compscld) %>%
+  melt(id=c("label", "NDAI")) %>%
+  ggplot(aes(x= value, y = NDAI, color= label)) + geom_point(alpha=0.1) + 
+  stat_density2d(aes(fill = ..level..), geom="polygon", alpha=.4) + 
+  facet_wrap(~ variable, ncol=3, scale="free") +
+  theme_minimal()
+  
+@
+\caption{Two dimensional density plot: y-axis is the distribution of NDAI and 
+the x-axis is the other variable. This figure was created with data from image 
+3.}
+\label{2D NDAI}
+\end{figure}
+
+
+\begin{figure}
+<<NDAI logSD for three pictures, echo=FALSE, message=FALSE, fig.width=7, fig.height=3, background=NA, warning=FALSE, cache=TRUE>>=
+
+mutate(scalecomplete(rawD)[sample(1:nrow(rawD)),], label = as.factor(label)) %>%
+  filter(label!=0, Image != "I3") %>%
+  select(label, NDAI, logSD, Image) %>%
+  ggplot(aes(x= logSD, y = NDAI, color= label)) + geom_point(alpha=0.1) + 
+  stat_density2d(aes(fill = ..level..), geom="polygon", alpha=.4) + 
+  facet_wrap(~ Image, scale="free") +
+  theme_minimal()
+@
+\caption{NDAI logSD distribution for Image one and two.}
+\label{conf}
+\end{figure}
+
+
+\section{Prediction methods}
+In this section, we will present several viable prediction methods for cloud 
+detection. 
+In all these models the response variable $Y$ is binary. 1 means cloud and -1 
+means clear. The ground truth data is not necessarily binary, as it also provides
+observations in which the expert was unsure about the observation.
+
+We contemplated two approaches:
+\begin{itemize}
+\item We could set the response variable for missing data to 0. Then we have a model
+which has three outputs $-1, 0$ and $1$.
+\item Or we could just ignore such datapoints. Then we just have the data which is $1$ or
+$-1$.
+\end{itemize}
+We decided to ignore such data points, because some models we choose are not able
+to handle "unsure" results. We assumed that these pixels, labled with 0,
+still are cloudy or clear. This assumption is of course very strict, because the 
+clouds situation can range from clear over slighly foggy to cloudy. As mentioned, 
+this is not discrete and one can implement a measure to estimate "how 
+cloudy" a pixel is, but this is not in the scope of the paper and probably not useful as
+the expert provides only cloudy clear and unsure data. And he did not asign numbers of cloudyness to the data.
+
+\subsection{Logistic Regression}
+
+The first estimator we suggest to predict cloudy and clear points is the usual 
+Logistic regression: 
+
+$$ \text{ln}\frac{\pi}{1-\pi} = X*\beta + \epsilon$$
+
+with $X$ the variable matrix, $\pi$ the likelihood of $Y$ beeing cloudy and $\beta$ the 
+unknown parameter. This equation 
+is solved by 
+assuming that $\epsilon_i \overset{\text{iid}}\sim N(0,\sigma^2)$ and then 
+using the 
+Newton-Raphson method to find the MLE for $\beta$.
+The standard R package gives by default probabiliteies for features to be $0$ (p values
+).
+These p values are all very small ($< 10^{-16}$) for all variables. This is an 
+effect, we can expect due to the high correlation between the different 
+features and the big dataset.
+<<eval=FALSE, echo=FALSE, cache=TRUE>>=
+rawD1 <- filter(rawD, label != 0) %>% mutate(label = (label + 1)/2)
+
+Model <- glm(label ~ NDAI + logSD + CORR + DF + CF + BF + AF + AN, data = rawD1, 
+             family = "binomial")
+summary(Model)
+
+rm(rawD1, Model)
+@
+That is why we do not really trust these results and we want to tryout two 
+different predictors, which are based on the idea of Logistic regression: One 
+uses all variables (NDAI, log(SD), CORR, DF, CF, BF, AF and AN) and the other uses 
+three variables only (NDAI, CORR and DF). We chose these variables by using 
+backwards selection using AIC. It is interesting to 
+notice that we received the same result using forwards selection.
+
+As we pointed out earlier, there might be reasons to scale the data in different 
+ways. Eventually, we proposed four estimators, which are based on logistic regression
+with different scaling schema and different variables :
+
+\begin{enumerate}
+\item LSA: {\bf L}ogistic Regression on the {\bf S}tandard scaled data based on 
+{\bf A}ll features,
+\item LIA: {\bf L}ogistic Regression on the {\bf I}mage scaled data based on 
+{\bf A}ll features,
+\item LS3: {\bf L}ogistic Regression on the {\bf S}tandard scaled data based on 
+{\bf 3} features,
+\item LI3: {\bf L}ogistic Regression on the {\bf I}mage scaled data based on 
+{\bf 3} features.
+\end{enumerate}
+
+\subsection{ELCM}
+We developed a model based on the same idea as the enhanced linear correlation matching (ELCM) algorithm of the paper\cite{shi2008}. Using our own implementation of the algorithm, we wanted to find thresholds for selected features to classify pixels for the presence of clouds. According to our exploratory data analysis (Part 1), NDAI and logSD seemed to be the best predictors and are the features used here. We developed two different models with cutoff values being either fixed or data-adaptive.\\
+
+\subsubsection{Grid search assuming a fixed threshold exists}
+In this part, we assume that the thresholds for NDAI and logSD are stable and robust for our three images. This means that we assume that the distributions of NDAI and logSD for cloud and cloud-free pixels are well separated by the sample thresholds for our tree images, and for the images we have not seen yet.\\
+
+\textbf{Method} We performed a grid search of the thresholds for NDAI and logSD from [-3, 6] in steps of 0.1 to identify the value leading to the smallest
+classification error relative to the expert labels. For each step, the number of accurately labelled pixels over the total number of pixels is determined. Our best threshold is the threshold with the highest accuracy rate for the learning set. The grid search was performed on unscaled, scaled by image and scaled over the three images features.\\
+
+
+<<result_elcm_fixed, include=TRUE, results="asis">>=
+result.ELCM.f <- read.csv("./figure/result_ELCM_f.csv")
+result.ELCM.f <- result.ELCM.f[,2:7]
+print(latex(result.ELCM.f, file = "", rowname = NULL, 
+            center = "center",
+            cgroup = c('Data Set', 'LogSD', 'NDAI'),
+            colheads = c("Learning Set", "Testing Set", 
+                         rep(c('Threshold', 'Accuracy'), 2)),
+      caption="Thresholds and Accuracy resulting from ELCM Algorithm assuming thresholds are fixed.",
+      label="result_elcm_fixed"))
+@
+
+
+\textbf{Result} Table \ref{result_elcm_fixed} shows the results for unscaled variables. For logSD and NDAI, the thresholds were found using only the learning set. Then we evaluated accuracy of the thresholds using the testing set. The learning set is two of the three images while the testing set is the remaining image. For unscaled data, we found that the thresholds for NDAI and logSD were stable and robust over the three images with a threshold of about 1.3 for logSD and 1 for NDAI. Looking at the distribution of the two variables logSD and NDAI for cloud and cloud-free pixels, these values seemed reasonable (see blue line for image 2 and feature NDAI on Figure \ref{distri_elcm}).\\
+
+
+\subsubsection{EM algorithm assuming the threshold is data adaptive}\label{ELCMtext}
+\textbf{Method} As in the paper\cite{shi2008}, we fitted a one-dimensional mixture model of two Gaussian distributions to observed NDAI and logSD by the EM algorithm initialized by the k-means algorithm. The R function kmean was used to initialize the EM algorithm with each pixel being assigned to the cloud or cloud-free cluster. Then, the R function normalmixEM from package mixtools was used to estimate the distribution of NDAI and logSD, and the R function turnpoints was used to find the minimum of the distribution between the fitted means of the two clusters. When no turnpoint exists between the two means, the average of the two means was taken. Finally, we considered the possibility to get images with either almost only no-cloud pixels or almost only cloudy pixels. To prevent from predicting an unrealistic threshold for such images, we defined boundaries for logSD and NDAI thresholds. It means that if the threshold predicted by our algorithm was out of our boundaries, we set the threshold at the value of the nearest boundary.\\\\
+This method is unsupervised, because we never used expert labels to find the threshold. Expert labels were only used to evaluate the accuracy of the model. Unlike the ELCM algorithm assuming thresholds are fixed, if we were given an image without expert labels, we would still be able to predict the threshold for this particular image. 
+
+
+<<result_elcm_em, include=TRUE, results="asis", eval=TRUE>>=
+result.ELCM.em <- read.csv("./figure/result_ELCM_em.csv")
+result.ELCM.em <- result.ELCM.em[,2:7]
+print(latex(result.ELCM.em, file='', rowname = NULL,
+            center = "centerline",
+            cgroup = c('Data Set', 'LogSD', 'NDAI'),
+            colheads = c("Learning Set", "Testing Set", 
+                         rep(c('Threshold', 'Accuracy'), 2)),
+      caption="Thresholds and Accuracy resulting from ELCM Algorithm assuming thresholds are data adaptive.",
+      label="result_elcm_em"))
+@
+
+\textbf{Result} The thresholds were found using the EM algorithm on the entire data of each image. For each threshold, accuracy was then calculated using again the entire data set for one image. Here, there is no need to divide the data set into a learning set and a testing set because we are not using the expert labels to find the threshold. As we are already blind of the labels, there is no risk of overfitting for this model. Data shown in table \ref{result_elcm_em} is for unscaled data. Accuracies found for the three images are high. The thresholds are different from one image to another except for images 1 and 2 with feature logSD.\\
+
+\subsubsection{Conclusion ELCM algorithm}
+The thresholds found with the two different assumptions (thresholds fixed or data adaptive) could seem different. However, looking at the distributions of logSD and NDAI, it does not make a big difference to choose one or the other threshold. See Figure\ref{distri_elcm}. With the two assumptions, we found high accuracies making it difficult to tell which method is the best. Further investigations were lead using ROC curves and a cross-validation for the ELCM algorithm assuming thresholds are stable to try to determine the best method. 
+\begin{figure}
+<<distri_elcm, include=TRUE, fig.width=9, fig.height=3, background=NA, warning=FALSE, cache=TRUE>>=
+image2 <- rawD[rawD$Image == "I2" & rawD$label != 0, ]
+image2$Label <- factor(image2$label)
+thresholds <- data.frame(values=c(1.0, 0.56), 
+                         Threshold = c("Fixed", "Data Adaptive"))
+ggplot(data=image2, aes(x=NDAI, group=Label, fill=Label)) + 
+  geom_density(alpha=0.5) +
+  geom_vline(data=thresholds, aes(xintercept = values, color=Threshold),
+             show_guide=TRUE) +
+  scale_colour_manual(values=c("red", "blue")) +
+  guides(fill = guide_legend(override.aes = list(colour = NULL))) +
+  theme_minimal()
+rm(image2)
+@
+\caption{Distribution of NDAI for unscaled image 2.}
+\label{distri_elcm}
+\end{figure}
+
+
+\subsection{CART estimator}
+Classification And Regression Trees are recursive partitioning methods that build 
+decision trees to predict a response on class variable $Y$ from inputs
+from n-dimensional explanatory features $X_1, X_2, ..., X_n$. 
+This type of model is extremely useful where a single predictive model does not 
+hold over the entire data space due to non-linearities between the features.
+The algorithm was introduced in 1984 by statisticians at UC Berkeley and Stanford.
+In the implementation we used, the full-tree is pruned by using cross-validation 
+and feature selection is a consequence of this pruning method. 
+CART uses a a two-method algorithm called Error-Complexity pruning, which uses 
+the measure $EC_\alpha(T)$, which is defined as:
+
+$$ EC_\alpha(T) = Err(T) + \alpha * \mathbf{card}(\widetilde{T})$$
+where, \\
+\hspace*{4em} $Err(T)$ is the resubstitution error estimate of tree $T$; \\
+\hspace*{4em} $\mathbf{card}(\widetilde{T})$ is the cardinality of set $\widetilde{T}$ 
+containing the leaves of tree $T$; \\  
+\hspace*{4em} and $\alpha$ is called the complexity parameter and defines the cost 
+of each leaf. \\
+
+The sequence of pruned trees is generated by successively pruning the node $t$ 
+to minimize the following function :
+$$g(t,T) = \frac{Err(t) - Err(T_t)}{\mathbf{card}(\widetilde{T}) -1}$$
+where, \\
+\hspace*{4em} $T_t$ is the sub-tree of $T$ rooted at node $t$;\\
+\hspace*{4em} and $\mathbf{card}(\widetilde{T})$ is the number of leaves of this sub-tree.
+
+The package rpart computes the best value for $\alpha$ by using cross-validation. 
+For pruning the tree, we choose the complexity parameter associated with minimum 
+error and taking into account the upper limit of the one standard deviation rule.
+
+\begin{figure}
+<<CART_calculation_all, eval=TRUE, echo=FALSE, include=TRUE, fig.width=4, fig.height=4, warning=FALSE, cache=TRUE>>=
+rawD1 <- filter(scalecomplete(rawD), label != 0) %>% mutate(label = (label +1)/2)
+rawD1$label[rawD1$label==1] <- "cloudy"
+rawD1$label[rawD1$label==0] <- "clear"
+Model <- rpart(label ~ . - Image - y - x - label, 
+               method="class", data = rawD1)
+
+#par(mfrow=c(1,2))
+# printcp(Model) # display the results
+#plotcp(Model) # visualize cross-validation results 
+# summary(Model) # detailed summary of splits
+#Model.pr <- prune(Model, cp=Model$cptable[which.min(Model$cptable[,"xerror"]),"CP"])
+# printcp(Model) # display the results
+# summary(Model.pr) # detailed summary of splits
+prp(Model)
+# visualize cross-validation results 
+#plotcp(Model)
+#prp(Model.pr)
+
+# plot tree
+
+# par(mfrow=c(1,2)) do not plot both models, because the other one will just 
+# do the same thing only that it assignes clear to everything smaller then 
+# -0.2
+Model1 <- rpart(label ~ NDAI, method="class", data = rawD1)
+#prp(Model1)
+@
+\caption{CART trained on all predictors}
+\label{CARTA}
+\end{figure}
+
+The calculated model in figure \ref{CARTA} is probably theoretically the best, but the 
+further distinction based on AN, does not make a big difference, as less than .5 \% of 
+all data are have a feature NDAI of less than $-.2$ and an AN of less then $-.4$. So 
+basically this model just makes a distinction based on NDAI. 
+That is why in the following we will mainly anlyse four types of models:
+\begin{enumerate}
+\item CARTS  : {\bf CART} Estimator based on all variables which are {\bf S}tandard scaled,
+\item CARTI  : {\bf CART} Estimator based on all variables which are {\bf I}mage scaled,
+\item CART1S: {\bf CART} Estimator based on NDAI which are {\bf S}tandard scaled,
+\item CART1I: {\bf CART} Estimator based on NDAI which are {\bf I}mage scaled.
+\end{enumerate}
+
+<<Another reference, echo= FALSE, eval=FALSE>>=
+B <- scalecomplete(rawD)
+A <- data.frame(NDAIb = B$NDAI < -.2, ANb = B$AN < -.4)
+table(A)
+1513/nrow(rawD)
+@
+  
+  
+  
+\section{Evaluation of the predictors}
+
+\subsection{ROC Curve}
+We plotted the ROC curve (figure \ref{ROC curve}) with false positive rate on vertical
+axis and true positive 
+rate on horizontal axis. Each point on the curve is set for a particular threshold. 
+We can see that none of our estimators is inadmissible, because no technique proposes an
+predictor which is performing always worse than other predictors. 
+This is a sign that all estimators might be useful in our case and we need better 
+criterions to decide which estimator is the best.
+
+\begin{figure}
+<<ROCcurves, echo=FALSE, message=FALSE, fig.width=6, fig.height=3, background=NA, warning=FALSE, cache=TRUE>>=
+#### ROC Curves Code #####
+
+
+image1 <- rawD[rawD$Image == "I1", ]
+ls <- image1[1:trunc(nrow(image1)*0.8), ]
+ls$logSD <- log(ls$SD)
+data_for_ROC <- my.threshold(ls, "logSD", -3, 0.1, 90)
+threshold <- data_for_ROC[[1]]
+sensitivity <- data_for_ROC[[2]]
+specificity <- data_for_ROC[[3]]
+thresholds <- data_for_ROC[[4]]
+index.thr <- which(as.character(round(thresholds, 1)) == 
+                     as.character(threshold))
+my.thr.fpr <- (1 - sensitivity)[index.thr]
+my.thr.tpr <- specificity[index.thr]
+
+### Logistic Regression #####
+calculateFPRTPR <- function(Prob = pLSA){
+  # This function calculates for given probablities the TPR and the FPR rate at
+  # different threshholds (thresholding after the first until thresholding just
+  # before the last point)
+  orderedlabels <- rawD$label[rawD$label !=0][order(Prob)]
+  CDFminus <- CDFmin(orderedlabels, length(orderedlabels))
+  FPR <- (max(CDFminus) - CDFminus)/max(CDFminus)
+  
+  CDFplus <- 1:length(CDFminus) - CDFminus
+  TPR <- (max(CDFplus) - CDFplus)/max(CDFplus)
+  return(data.frame(FPR, TPR))
+}
+
+pLSA <- LogitAllprobabilities(Traind = rawD, Testd = scalecomplete(rawD)[rawD$label != 0, ])
+pLIA <- LogitAllprobabilities(Traind = rawD, Testd = scalebyimage(rawD)[rawD$label != 0, ])
+pLS3 <- Logit3probabilities(Traind = rawD, Testd = scalecomplete(rawD)[rawD$label != 0, ])
+pLI3 <- Logit3probabilities(Traind = rawD, Testd = scalebyimage(rawD)[rawD$label != 0, ])
+
+pCAS <- CARTprob(Traind = scalecomplete(rawD), Testd = scalecomplete(rawD)[rawD$label != 0, ])
+pCAI <- CARTprob(Traind = scalebyimage(rawD), Testd = scalebyimage(rawD)[rawD$label != 0, ])
+pC1S <- CART1prob(Traind = scalecomplete(rawD), Testd = scalecomplete(rawD)[rawD$label != 0, ])
+pC1I <- CART1prob(Traind = scalebyimage(rawD), Testd = scalebyimage(rawD)[rawD$label != 0, ])
+
+
+rocCurve <- rbind(
+  data.frame(fpr = 1 - sensitivity,           tpr = specificity,               Model = "ELCM"),
+  data.frame(fpr = calculateFPRTPR(pLSA)[,1], tpr = calculateFPRTPR(pLSA)[,2], Model = "LSA"),
+  data.frame(fpr = calculateFPRTPR(pLIA)[,1], tpr = calculateFPRTPR(pLIA)[,2], Model = "LIA"),
+  data.frame(fpr = calculateFPRTPR(pLS3)[,1], tpr = calculateFPRTPR(pLS3)[,2], Model = "LS3"),
+  data.frame(fpr = calculateFPRTPR(pLI3)[,1], tpr = calculateFPRTPR(pLI3)[,2], Model = "LI3"),
+  data.frame(fpr = calculateFPRTPR(pCAS)[,1], tpr = calculateFPRTPR(pCAS)[,2], Model = "CARTS"),
+  data.frame(fpr = calculateFPRTPR(pCAI)[,1], tpr = calculateFPRTPR(pCAI)[,2], Model = "CARTI"),
+  data.frame(fpr = calculateFPRTPR(pC1S)[,1], tpr = calculateFPRTPR(pC1S)[,2], Model = "CART1S"),
+  data.frame(fpr = calculateFPRTPR(pC1I)[,1], tpr = calculateFPRTPR(pC1I)[,2], Model = "CART1I"))
+
+### plot curve ####
+ggplot(rocCurve) +
+  geom_line(aes(x=fpr, y=tpr, color = Model)) +
+  geom_abline(aes(slope=1, intercept=0)) +
+  theme_minimal()
+  
+@
+\caption{Here we can see the ROC curves for different estimators. Note, that the CART estimators has a discrete flavor, because the scores they provide are based on fixed theshold.}
+\label{ROC curve}
+\end{figure}
+
+\subsection{AIC and BIC}
+The Akaike and Bayesian Information Criterion area criteria for model selection based on the number of parameters and the maximized value of the likelihood function of the model. The main difference between AIC and BIC lies on the penalty term related to the number of observations. Whereas both criteria have a penalty term related to K, the nuber of parameters, they differ on the weight applied to it. AIC penalizes K by some constant (usually 2), while BIC penalizes the the criteria by the natural log of the number of observations.
+$$AIC = K*2 - 2\ln(\hat{L})$$
+$$BIC = K*\ln(n) - 2\ln(\hat{L})$$
+
+It is interesting to notice that both the AIC and BIC penalize lack of fit more than model complexity. These criteria are useful because our problem is well conditioned (k << n). and the samples are large, most likely producing asymptotic results. 
+
+One possible reason to use AIC over Cross-Validation is to avoid long computation times. This only holds asymptotically because minimizing the AIC is similar to minimizing the CV score \cite{stone1977}. On the same token, asymptotically and for linear models, minimizing BIC is similar to leave-k-out cross validation \cite{shao1997}.
+
+<<Calculate AIC for Logistic Estimators, echo=FALSE, cache=TRUE>>=
+rawD1 <- filter(rawD, label != 0) %>% mutate(label = (label + 1)/2)
+# just deletes the 0s and makes clear data 0 and cloudy 1
+
+#LSA:
+Model <- glm(label ~ NDAI + logSD + CORR + DF + CF + BF + AF + AN
+             , data = scalecomplete(rawD1), family = "binomial")
+aicLSA <- Model$aic
+bicLSA <- BIC(Model)
+#LIA:
+Model <- glm(label ~ NDAI + logSD + CORR + DF + CF + BF + AF + AN
+             , data = scalebyimage(rawD1), family = "binomial")
+aicLIA <- Model$aic
+bicLIA <- BIC(Model)
+#LS3:
+Model <- glm(label ~ NDAI + CORR + DF
+             , data = scalecomplete(rawD1), family = "binomial")
+aicLS3 <- Model$aic
+bicLS3 <- BIC(Model)
+#LI3:
+Model <- glm(label ~ NDAI + CORR + DF
+             , data = scalebyimage(rawD1), family = "binomial")
+aicLI3 <- Model$aic
+bicLI3 <- BIC(Model)
+@
+
+\subsection{Cross-validation}
+We implemented two types of cross-validation and we want to start with the canoncial,
+but for this case not optimal one:
+
+\subsubsection{Standard Cross Validation}
+We implemented the following cross validation algorithm:
+
+\begin{algorithm}[H]
+1.) Delete all pixels which are not labeled as cloud or clear\\
+2.) Randomly seperate the entire data set $D$ into $k$ equally sized data sets 
+such that
+$$ \cup_{i = 1}^k U_i = D ~~ \text{ and } ~~ \text{for all $i \neq j$ }~ U_i 
+\cap U_j = \emptyset$$
+\For{i = 1, 2, ..., k}{
+  3.) Train Model on $D \backslash U_i$ \\
+  4.) Predict the labels of $U_i$ \\
+  5.) Calculate the propotion of wrongly predicted points 
+}
+\end{algorithm}
+
+In this method, we discarded the data which the expert was unsure about.
+This is about $40\%$ of the entire data set. This is of course a problem. When we say in the following that we 
+predicted  $90\%$ of the data correctly, we really mean that we predicted 
+$90\%$ of the data, for which the expert was able to identify the pixel as 
+cloudy or clear, correctly. Of course we are also able to predict the data 
+which was not classified by the expert, but we should not assume that we will 
+perform here as good as in the case, which was classified by the expert.
+
+Naturally, cross-validation must be evaluated under the problem that is being adressed
+and its assumptions. It is well known that the images have a high correlation between
+neighboring pixels and there seem to be effects within images. To overcome this, we 
+designed a cross-validation 
+method that somewhat accounts for this by training on 2 images and then predicting on 
+another 
+one. Another possible approach, not implemented by us, would be to slice the images into 
+smaller patches and then do cross validation on these smaller patches. However this approach would be able to handle issues which arsie due to effects because of the correlation due to a neighborhood. But it would not be able to handle effects, which affect an entire picture. One example would be the sun position, when a particular image was taken.
+
+<<Calculate standard CV for LR, echo=FALSE, cache=TRUE>>=
+cvLSA <- mean(CrossValidation(LogitAllprediction, 5, scalecomplete(rawD)))
+cvLIA <- mean(CrossValidation(LogitAllprediction, 5,  scalebyimage(rawD)))
+cvLS3 <- mean(CrossValidation(Logit3prediction,   5, scalecomplete(rawD)))
+cvLI3 <- mean(CrossValidation(Logit3prediction,   5,  scalebyimage(rawD)))
+@
+
+<<Calculate standard CV for CART, echo=FALSE, cache=TRUE>>=
+cvCAS <- mean(CrossValidation(CARTpred, 5, scalecomplete(rawD)))
+cvCAI <- mean(CrossValidation(CARTpred, 5, scalebyimage(rawD)))
+cvC1S <- mean(CrossValidation(CART1pred, 5, scalecomplete(rawD)))
+cvC1I <- mean(CrossValidation(CART1pred, 5, scalebyimage(rawD)))
+@
+
+\subsubsection{Cross-Validation per image}
+So let us now consider a slightly different type of cross-validation. Instead of 
+randomly dividing the data set into parts, we took the data of each image 
+to be a subset. The algorithm then looks like this:
+
+\begin{algorithm}[H]
+1.) Delete all pixels which are not labeled as cloud or clear\\
+2.) Define $U_i := \text{"Data from Image $i$"}$
+\For{i = 1, 2, 3}{
+  3.) Train Model on $D \backslash U_i$ \\
+  4.) Predict the labels of $U_i$ \\
+  5.) Calculate the propotion of wrongly predicted points 
+}
+\end{algorithm}
+
+This kind of cross validation test a very special case of robusteness. An 
+estimator which is very sensible to effects which are specific for a particular 
+image or neighborhood, will perform very poorly. 
+
+We eventually concluded that this type of cross validation is best criterion of model selection for this problem. But as the sample size is so small, we would want to have more pictures to make this meachnism really give good results. That is why we also consider the other model selection methods.
+
+<<Calculate CV per Image for Logistic Regression, echo=FALSE, cache=TRUE>>=
+cviLSA <- CrossValiPictures(LogitAllprediction, scalecomplete(rawD))
+cviLIA <- CrossValiPictures(LogitAllprediction, scalebyimage(rawD))
+cviLS3 <- CrossValiPictures(Logit3prediction,   scalecomplete(rawD))
+cviLI3 <- CrossValiPictures(Logit3prediction,   scalebyimage(rawD))
+@
+
+
+<<Calculate CV per Image for CART, echo=FALSE, cache=TRUE>>=
+cviCAS <- CrossValiPictures(CARTpred, scalecomplete(rawD))
+cviCAI <- CrossValiPictures(CARTpred, scalebyimage(rawD))
+cviC1S <- CrossValiPictures(CART1pred, scalecomplete(rawD))
+cviC1I <- CrossValiPictures(CART1pred, scalebyimage(rawD))
+@
+
+<<Calculate CV per Image for ELCM, echo=FALSE, cache=TRUE, message=FALSE, warning=FALSE>>=
+# standard cross validation
+cvELCM_fixed <- mean(CrossValidation(FUN = ELCM_fixed, 5, rawD))
+# cross validation per image
+cviELCM_fixed <- CrossValiPictures(FUN = ELCM_fixed, Fulldata = rawD)
+@
+
+
+\begin{figure}
+<<print Table, echo=FALSE, cache = TRUE, results = "asis">>=
+
+cvi <- rbind(cviLSA[,2], cviLIA[,2], cviLS3[,2], cviLI3[,2], cviCAS[,2], cviCAI[,2], cviC1S[,2], cviC1I[,2], cviELCM_fixed[, 2])
+cvi <- cvi*100 # later in %
+aic = c(aicLSA, aicLIA, aicLS3, aicLI3, NA, NA, NA, NA, NA)/1e4
+bic = c(bicLSA, bicLIA, bicLS3, bicLI3, NA, NA, NA, NA, NA)/1e4
+stdCV = c(cvLSA, cvLIA, cvLS3, cvLI3, cvCAS, cvCAI, cvC1S, cvC1I, cvELCM_fixed)*100 # later in %
+
+S <- data.frame(aic, bic, stdCV)
+S <- cbind(S, cvi)
+
+colnames(S) <- c("AIC", "BIC", "Std CV", "pred 1", "pred 2", "pred 3")
+rownames(S) <- c("LSA", "LIA", "LS3", "LI3", "CARTS", "CARTI", 
+                 "CART1S", "CART1I", "ELCM fixed")
+
+kable(round(S,3), align='c', format='latex')
+@
+\caption{AIC and BIC: in $10^4$, Std CV: Ouput of the standard Cross Validation (in $\%$), 
+pred 1: Output of the Cross Validation per image: train the model on image 2 
+and 3 and then predict image 1 (in $\%$).}
+\label{Results}
+\end{figure}
+
+\subsubsection{Performance of the ELCM data adaptive model}
+For the ELCM algorithm assuming thresholds are data adaptive, it makes little sense to compute a cross validation. Indeed, as said in part 3.2 this classifier is unsupervised and specific to each image. The algorithm uses the distribution of the feature to infer the threshold. Thus, we used the entire data set of each image to both predict the thresholds and evaluate the accuracy. See the accuracies in Table\ref{ELCM_CV_eval}. Here accuracies were calculated using the two features logSD and NDAI. Pixels were first classified using NDAI, then using logSD.
+
+
+<<ELCM_EM_eval, include=TRUE, results="asis", cache=TRUE>>=
+# image 1
+rawD1 <- rawD[rawD$Image == "I1", ]
+rawD1 <- filter(rawD1, label != 0)
+pred1 <- ELCM_EM(rawD1, rawD1)
+evalELCM_EM1 <- sum(pred1 == rawD1$label)/ nrow(rawD1)
+# image 2
+rawD2 <- rawD[rawD$Image == "I2", ]
+rawD2 <- filter(rawD2, label != 0)
+pred2 <- ELCM_EM(rawD2, rawD2)
+evalELCM_EM2 <- sum(pred2 == rawD2$label)/ nrow(rawD2)
+# image 3
+rawD3 <- rawD[rawD$Image == "I3", ]
+rawD3 <- filter(rawD3, label != 0)
+pred3 <- ELCM_EM(rawD3, rawD3)
+evalELCM_EM3 <- sum(pred3 == rawD3$label)/ nrow(rawD3)
+ELCM_EM_eval <- data.frame(Accuracy=c(evalELCM_EM1, evalELCM_EM2, evalELCM_EM3))
+rownames(ELCM_EM_eval) <- c("Image 1", "Image 2", "Image 3")
+print(xtable(ELCM_EM_eval, 
+             caption="Accuracies of ELCM algorithm assuming thresholds are data adaptive",
+             label="ELCM_CV_eval"))
+@
+
+
+
+
+
+%(Sören) Talk here about that The ROC of CART is not bad quality but because of the thresholds
+% it has bounds!
+
+
+
+\section{Conclusion}
+We concluded that the best predictor is the ELCM estimator with an adaptive threshold 
+choice using the varivables 
+variables NDAI and log(SD). Figure \ref{predvar2} shows that this predictor perfoms 
+well for 
+all images, but there are still a few things we would want to improve.
+
+First of all, our predictor does not make any use of the {\bf location} of a particular 
+pixel. It seems quite unintuitive that a pixel is clear while it is sourrounded by 
+clouds. We would expect such a pixel to be cloudy. For further research it 
+would be a good idea to consider {\bf smoothing} the probabilities, such that a pixel is 
+shrinked towards the average of the pixel in its neighborhood. This might make the 
+predictor more robust against outlier, but it could perform poorly in areas with a lot 
+of clouds and clear points very close to each other, for example at the boundary.
+
+The predictor is working with non fixed thresholds. This makes it possible, that we adapt for every image seperately and thus we can hope that we will even perform 
+very well for images which are looking different from ours. However as we are choosing 
+for each image a different threshold, we might run into trouble, when the image is only 
+cloudy or only clear. We tried to protect us against these cases by always choosing the 
+threshold in a particular interval, but we have not seen data which was only cloudy or 
+only clear. Thus we should investigate what might happen in such a case to find an 
+optimal strategy to choose the threshold in these cases.
+
+<<Predictor Image var 1, echo=FALSE, message=FALSE, fig.width=6, fig.height=3, background=NA, warning=FALSE, cache=TRUE, eval=FALSE>>=
+
+
+rawD1 <- rawD
+# rawD1$Label[rawD$label==1] = "Cloudy"
+# rawD1$Label[rawD$label==-1] = "Clear"
+# rawD1$Label[rawD$label==0] = "Unsure"
+# rawD1$Label <- factor(rawD1$Label)
+rawD1$Expert <- (rawD1$label + 1)/2
+
+rawD1$CART <- CART2prob(scalecomplete(rawD1), scalecomplete(rawD1))
+
+
+# rawD1 <- filter(rawD1, Image =="I1") # take this out eventually
+select(rawD1, Image, y, x, Expert, CART) %>%
+  melt(id =c('y', 'x', 'Image')) %>%
+  ggplot() + 
+  geom_point(aes(x=x, y=y, color=value)) + 
+  facet_grid(variable ~ Image) +
+  theme_minimal()
+
+
+rm(rawD1)
+@
+
+
+\begin{figure}
+<<Predictor Image var 2, echo=FALSE, message=FALSE, fig.width=5, fig.height=3, background=NA, warning=FALSE, cache=TRUE>>=
+
+rawD1 <- rawD
+rawD1$Expert[rawD$label==1] = "Cloudy"
+rawD1$Expert[rawD$label==-1] = "Clear"
+rawD1$Expert[rawD$label==0] = "Unsure"
+# rawD1$Expert <- factor(rawD1$Expert)
+# rawD1$Expert <- (rawD1$label + 1)/2
+
+
+rawD1$ELCM <- ELCM_EM(rawD1, rawD1)
+rawD1$ELCM[rawD1$ELCM==1] = "Cloudy"
+rawD1$ELCM[rawD1$ELCM==-1] = "Clear"
+
+rawD1$ELCMtrunc <- rawD1$ELCM
+rawD1$ELCMtrunc[rawD1$Expert == "Unsure"] <- "Unsure"
+
+rawD1$Image <- factor(rawD1$Image)
+levels(rawD1$Image) <- c("Image 1", "Image 2", "Image3")
+
+# rawD1 <- filter(rawD1, Image =="I1") # take this out eventually
+select(rawD1, Image, y, x, Expert, ELCM, ELCMtrunc) %>%
+  melt(id =c('y', 'x', 'Image')) %>%
+  mutate(value = factor(value)) %>%
+  ggplot() + 
+  geom_point(aes(x=x, y=y, color=value)) + 
+  facet_grid(variable ~ Image) + 
+  scale_colour_manual(values=c("green", "blue", "white", "black", "red")) +
+  theme_minimal() +
+  theme(axis.title.x = element_blank(), axis.ticks = element_blank(),
+        axis.title.y = element_blank(), strip.background = element_blank(),
+        plot.background = element_blank(), panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(), axis.text = element_blank(),
+        panel.background = element_rect(fill = "grey97", colour = 'white'),
+        legend.background = element_rect(fill = 'grey97', colour = 'white'))
+@
+\caption{The first row shows the expert labels, the second the predicted values with our 
+CART predictor and the third row shows the predicted values only on the set where the 
+expert was sure.}
+\label{predvar2}
+\end{figure}
+
+\printbibliography
+\end{document}

@@ -13,11 +13,12 @@ Please follow the instructions below to reproduce our research. We assume the us
 
 #####INSTRUCTIONS FOR *NIX SYSTEMS:
 
+0. Send us an e-mail at rafaelvalle@berkeley.edu to receive some of the files that have been modified to make compilation run smoother.
 1. Open the command prompt
 2. Create folder to store this repository (mkdir my_research_folder)
 3. Cd into the folder, cd ~/my_research_folder
 4. Clone this repository ( git clone https://github.com/rafaelvalle/stats215a.git )
 5. Cd into the repository folder ( cd stats215a )
-6. Change permissions for the script that compiles the pdf ( sudo chmod 744              compile_paper.sh)
+6. Change permissions for the script that compiles the pdf ( sudo chmod 744 compile_paper.sh)
 7. Run the script to compile the pdf ( ./compile_paper.sh )
 8. Breathe and go drink some water (The pdf file will open automatically)

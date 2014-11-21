@@ -13,7 +13,9 @@ Please follow the instructions below to reproduce our research. We assume the us
 
 #####INSTRUCTIONS FOR *NIX SYSTEMS:
 
-0. Send us an e-mail at rafaelvalle@berkeley.edu to receive some of the files that have been modified to make compilation run smoother.
+0. Send us an e-mail at rafaelvalle@berkeley.edu to receive some of the files that have been modified to make compilation run smoother. You can fix the error, in case it happens, by commenting all "stop(...)"
+statements in helperfunction.R logisticregression.R  and EvaluateModel.R out.
+
 1. Open the command prompt
 2. Create folder to store this repository (mkdir my_research_folder)
 3. Cd into the folder, cd ~/my_research_folder
